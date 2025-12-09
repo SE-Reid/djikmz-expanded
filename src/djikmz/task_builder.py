@@ -15,7 +15,7 @@ from .model.mission_config import (
 )
 from .model.coordinate_system_param import CoordinateSystemParam, CoordinateModeEnum, HeightModeEnum, PositionTypeEnum
 from .model.action_group import ActionGroup, ActionTrigger, TriggerType
-from .model.action import  RotateYawAction, GimbalRotateAction, HoverAction, TakePhotoAction 
+from .model.action import  RotateYawAction, GimbalRotateAction, HoverAction, TakePhotoAction, StartRecordAction, StopRecordAction, FocusAction, ZoomAction, OrientedShootAction
 import zipfile
 import io
 
@@ -161,11 +161,30 @@ class WaypointBuilder:
         action = TakePhotoAction(
             action_id=0,  # Will be assigned at build time
             file_suffix=suffix,
-            
+            payload_lens=lens
         )
         self._actions.append(action)
         return self
     
+    def start_video_recording(self, suffix: Optional[str] = "", lens: Optional[str] = None) -> 'WaypointBuilder':
+        """Add a start video recording action at this waypoint."""
+        action = StartRecordAction(
+            action_id=0,  # Will be assigned at build time
+            file_suffix=suffix,
+            payload_lens=lens          
+        )
+        self._actions.append(action)
+        return self
+    
+    def stop_video_recording(self, lens: Optional[str] = None) -> 'WaypointBuilder':
+        """Add a stop video recording action at this waypoint."""
+        action = StopRecordAction(
+            action_id=0,  # Will be assigned at build time
+            payload_lens=lens          
+        )
+        self._actions.append(action)
+        return self
+
     def hover(self, duration: float) -> 'WaypointBuilder':
         """Add a hover action at this waypoint."""
         action = HoverAction(
@@ -175,7 +194,7 @@ class WaypointBuilder:
         self._actions.append(action)
         return self
 
-    def heading(self, angle: float) -> 'WaypointBuilder':
+    def rotate_yaw(self, angle: float) -> 'WaypointBuilder':
         """Set the drone's heading (yaw) at this waypoint.
         
         Args:
@@ -192,72 +211,6 @@ class WaypointBuilder:
         self._actions.append(action)
         return self
     
-    def gimbal_down(self, angle: float) -> 'WaypointBuilder':
-        """Point gimbal down to specified absolute angle.
-        
-        Args:
-            angle: Absolute pitch angle in degrees (0 = forward, 90 = straight down)
-        """
-        action = GimbalRotateAction(
-            action_id=0,  # Will be assigned at build time
-            gimbal_pitch_rotate_enable=1,
-            gimbal_pitch_rotate_angle=-abs(angle)  # Negative for downward from forward
-        )
-        self._actions.append(action)
-        return self
-    
-    def gimbal_up(self, angle: float) -> 'WaypointBuilder':
-        """Point gimbal up to specified absolute angle.
-        
-        Args:
-            angle: Absolute pitch angle in degrees (0 = forward, positive = upward)
-        """
-        action = GimbalRotateAction(
-            action_id=0,  # Will be assigned at build time
-            gimbal_pitch_rotate_enable=1,
-            gimbal_pitch_rotate_angle=abs(angle)  # Positive for upward
-        )
-        self._actions.append(action)
-        return self
-    
-    def gimbal_front(self) -> 'WaypointBuilder':
-        """Point gimbal straight forward (0 degrees pitch)."""
-        action = GimbalRotateAction(
-            action_id=0,  # Will be assigned at build time
-            gimbal_pitch_rotate_enable=1,
-            gimbal_pitch_rotate_angle=0.0  # Forward position
-        )
-        self._actions.append(action)
-        return self
-    
-    def gimbal_pitch(self, angle: float) -> 'WaypointBuilder':
-        """Set gimbal to specific pitch angle.
-        
-        Args:
-            angle: Pitch angle in degrees (-90 to +90, negative = down, positive = up)
-        """
-        action = GimbalRotateAction(
-            action_id=0,  # Will be assigned at build time
-            gimbal_pitch_rotate_enable=1,
-            gimbal_pitch_rotate_angle=angle
-        )
-        self._actions.append(action)
-        return self
-    
-    def gimbal_yaw(self, angle: float) -> 'WaypointBuilder':
-        """Set gimbal to specific yaw angle.
-        
-        Args:
-            angle: Yaw angle in degrees (0-360, relative to north)
-        """
-        action = GimbalRotateAction(
-            action_id=0,  # Will be assigned at build time
-            gimbal_yaw_rotate_enable=1,
-            gimbal_yaw_rotate_angle=angle
-        )
-        self._actions.append(action)
-        return self
-    
     def gimbal_rotate(self, pitch: float = None, yaw: float = None, roll: float = None) -> 'WaypointBuilder':
         """Set gimbal to specific pitch, yaw, and/or roll angles.
         TODO: seems in the App, the roll is not used. 
@@ -268,19 +221,56 @@ class WaypointBuilder:
             roll: Roll angle in degrees
         """
         action = GimbalRotateAction(action_id=0)  # Will be assigned at build time
-        
+
+        # Check which axes are specified
+        axes = []
         if pitch is not None:
-            action.gimbal_pitch_rotate_enable = 1
-            action.gimbal_pitch_rotate_angle = pitch
-            
+            axes.append('pitch')
         if yaw is not None:
-            action.gimbal_yaw_rotate_enable = 1
-            action.gimbal_yaw_rotate_angle = yaw
-            
+            axes.append('yaw')
         if roll is not None:
-            action.gimbal_roll_rotate_enable = 1
-            action.gimbal_roll_rotate_angle = roll
-            
+            axes.append('roll')
+
+        # If more than one axis is specified, split into separate actions
+        if len(axes) >= 1:
+            if pitch is not None:
+                action = GimbalRotateAction(action_id=0)
+                action.gimbal_pitch_rotate_enable = 1
+                action.gimbal_pitch_rotate_angle = pitch
+                self._actions.append(action)
+            if yaw is not None:
+                action = GimbalRotateAction(action_id=0)
+                action.gimbal_yaw_rotate_enable = 1
+                action.gimbal_yaw_rotate_angle = yaw
+                self._actions.append(action)
+            if roll is not None:
+                action = GimbalRotateAction(action_id=0)
+                action.gimbal_roll_rotate_enable = 1
+                action.gimbal_roll_rotate_angle = roll
+                self._actions.append(action)
+        return self
+    
+    def set_focus(self, is_point_focus: bool, focus_position_x: float, focus_position_y: float, focus_region_width: Optional[float] = 0.0, focus_region_height: Optional[float] = 0.0, is_infinite: bool = False) -> 'WaypointBuilder':
+        """Set camera focus distance."""
+        if is_point_focus:
+            point_focus = 1
+            if focus_region_width != 0.0 or focus_region_height != 0.0:
+                raise ValueError("Focus region size should not be set when using point focus")
+        else:
+            point_focus = 0
+            if focus_region_width == 0.0 or focus_region_height == 0.0:
+                raise ValueError("Focus region size must be set when not using point focus")
+        
+        infinite_focus = int(is_infinite)
+        action = FocusAction(
+            action_id=0,  # Will be assigned at build time
+            is_point_focus=point_focus,
+            focus_x=focus_position_x,
+            focus_y=focus_position_y,
+            focus_region_width=focus_region_width,
+            focus_region_height=focus_region_height,
+            is_infinite_focus=infinite_focus
+        )
         self._actions.append(action)
         return self
     
